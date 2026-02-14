@@ -86,7 +86,6 @@ public class RumiJavaLogger {
 					try {
 						String line;
 						while ((line = br.readLine()) != null) {
-							stdout.println(line);
 							log_print(FacilityCode.User, default_level, line);
 						}
 					} finally {
@@ -108,7 +107,6 @@ public class RumiJavaLogger {
 					try {
 						String line;
 						while ((line = br.readLine()) != null) {
-							stderr.println(line);
 							log_print(FacilityCode.User, SeverityLevel.Error, line);
 						}
 					} finally {

@@ -7,6 +7,8 @@ import java.io.InputStreamReader;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.io.PrintStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -138,6 +140,16 @@ public class RumiJavaLogger {
 	 */
 	public void print(SeverityLevel level, String message) {
 		log(FacilityCode.User, level, message);
+	}
+
+	public void print_exception(Exception ex) {
+		StringWriter sw = new StringWriter();
+		PrintWriter pw = new PrintWriter(sw);
+		ex.printStackTrace(pw);
+		String stack_trace = sw.toString();
+		pw.close();
+
+		log_print(FacilityCode.User, SeverityLevel.Error, stack_trace);
 	}
 
 	private void log_print(FacilityCode f, SeverityLevel level, String message) {

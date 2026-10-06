@@ -166,7 +166,7 @@ public class RumiJavaLogger {
 				log_message = "[  \u001B[32mOK\u001B[0m  ] "+e.text();
 				break;
 			case Debug:
-				log_message = "[DEBUG ] "+e.text();
+				log_message = "[ TEST ] "+e.text();
 				break;
 			case Notice:
 			case Informational:

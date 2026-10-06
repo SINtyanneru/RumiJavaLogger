@@ -1,26 +1,13 @@
 package su.rumishistem.rumi_java_logger;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
-import java.io.PrintStream;
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
+import java.io.*;
+import java.net.*;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
+import java.nio.file.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Consumer;
+import java.util.*;
+import java.util.concurrent.LinkedBlockingQueue;
 
 public class RumiJavaLogger {
 	private boolean save_log_disc_enable = false;
@@ -33,6 +20,34 @@ public class RumiJavaLogger {
 	private boolean hijack_std_enable = false;
 	private PrintStream stdout = null;
 	private PrintStream stderr = null;
+
+	private LinkedBlockingQueue<LogEntry> log_queue = new LinkedBlockingQueue<>(10000);
+	private volatile boolean running = true;
+	private Thread log_worker;
+
+	public RumiJavaLogger() {
+		log_worker = new Thread(new Runnable() {
+			@Override
+			public void run() {
+				while (running || !log_queue.isEmpty()) {
+					try {
+						LogEntry e = log_queue.take();
+						logentry_print(e);
+					} catch (InterruptedException e) {
+						return;
+					} catch (Exception ex) {
+						ex.printStackTrace();
+						//無視
+					} catch (Throwable tw) {
+						tw.printStackTrace();
+						//無視
+					}
+				}
+			}
+		});
+		//log_worker.setDaemon(true);
+		log_worker.start();
+	}
 
 	/**
 	 * ログをディスクに保存する設定をします。
@@ -105,6 +120,9 @@ public class RumiJavaLogger {
 		log(FacilityCode.User, level, message);
 	}
 
+	/**
+	 * Exceptionを標準エラーへ流します。
+	 */
 	public void print_exception(Exception ex) {
 		StringWriter sw = new StringWriter();
 		PrintWriter pw = new PrintWriter(sw);
@@ -115,56 +133,89 @@ public class RumiJavaLogger {
 		log_print(FacilityCode.User, SeverityLevel.Error, stack_trace);
 	}
 
+	/**
+	 * Throwableを標準エラーへ流します。
+	 */
+	public void print_throwable(Throwable ex) {
+		StringWriter sw = new StringWriter();
+		PrintWriter pw = new PrintWriter(sw);
+		ex.printStackTrace(pw);
+		String stack_trace = sw.toString();
+		pw.close();
+
+		log_print(FacilityCode.User, SeverityLevel.Error, stack_trace);
+	}
+
+	/**
+	 * ロガーを終了します。
+	 */
+	public void close() throws InterruptedException {
+		running = false;
+		log_worker.join();
+	}
+
 	private void log_print(FacilityCode f, SeverityLevel level, String message) {
+		log_queue.offer(new LogEntry(f, level, message));
+	}
+
+	private void logentry_print(LogEntry e) {
 		String log_message = "";
 
-		switch (level) {
+		switch (e.severity_level()) {
 			case Ok:
-				log_message = "[  \u001B[32mOK\u001B[0m  ] "+message;
+				log_message = "[  \u001B[32mOK\u001B[0m  ] "+e.text();
 				break;
 			case Debug:
-				log_message = "[DEBUG ] "+message;
+				log_message = "[DEBUG ] "+e.text();
 				break;
 			case Notice:
 			case Informational:
-				log_message = "[ INFO ] "+message;
+				log_message = "[ INFO ] "+e.text();
 				break;
 			case Warning:
-				log_message = "[ \u001B[33mWARN\u001B[0m ] "+message;
+				log_message = "[ \u001B[33mWARN\u001B[0m ] "+e.text();
 				break;
 			case Error:
 			case Critical:
 			case Alert:
 			case Emergency:
-				log_message = "[\u001B[31mFAILED\u001B[0m] "+message;
+				log_message = "[\u001B[31mFAILED\u001B[0m] "+e.text();
 				break;
 		}
 
 		//コンソールに出力
-		switch (level) {
+		switch (e.severity_level()) {
 			case Notice:
 			case Informational:
 			case Ok:
 			case Debug:
-				print_stdout(log_message);
+				if (hijack_std_enable) {
+					stdout.println(log_message);
+				} else {
+					System.out.println(log_message);
+				}
 				break;
 			case Warning:
 			case Error:
 			case Critical:
 			case Alert:
 			case Emergency:
-				print_stderr(log_message);
+				if (hijack_std_enable) {
+					stderr.println(log_message);
+				} else {
+					System.err.println(log_message);
+				}
 				break;
 		}
 
 		//SysLog
 		if (syslog_enable) {
-			int pri = f.to_code() * 8 + level.to_code();
+			int pri = e.facility().to_code() * 8 + e.severity_level().to_code();
 			String timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_DATE_TIME);
 			String app = "None";
 
 			String header = "<"+pri+">1 "+timestamp+" "+app;
-			byte[] data = (header+" "+message).getBytes(StandardCharsets.UTF_8);
+			byte[] data = (header+" "+e.text()).getBytes(StandardCharsets.UTF_8);
 
 			try {
 				DatagramSocket udp = new DatagramSocket();
@@ -184,22 +235,6 @@ public class RumiJavaLogger {
 				Files.writeString(log_dir_path.resolve(file_name), "[" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm.ss")) + "]" + log_message + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
 			} catch (IOException ex) {
 			}
-		}
-	}
-
-	private void print_stdout(String message) {
-		if (hijack_std_enable) {
-			stdout.println(message);
-		} else {
-			System.out.println(message);
-		}
-	}
-
-	private void print_stderr(String message) {
-		if (hijack_std_enable) {
-			stderr.println(message);
-		} else {
-			System.err.println(message);
 		}
 	}
 }

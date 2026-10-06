@@ -10,6 +10,8 @@ import java.util.*;
 import java.util.concurrent.LinkedBlockingQueue;
 
 public class RumiJavaLogger {
+	private static RumiJavaLogger instance;
+
 	private boolean save_log_disc_enable = false;
 	private Path log_dir_path = null;
 
@@ -47,6 +49,15 @@ public class RumiJavaLogger {
 		});
 		//log_worker.setDaemon(true);
 		log_worker.start();
+
+		instance = this;
+	}
+
+	/**
+	 * RJLのインスタンスを取得する
+	 */
+	public static RumiJavaLogger get_instance() {
+		return instance;
 	}
 
 	/**

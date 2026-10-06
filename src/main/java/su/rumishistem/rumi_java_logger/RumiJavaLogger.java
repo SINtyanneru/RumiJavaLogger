@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 public class RumiJavaLogger {
 	private boolean save_log_disc_enable = false;
@@ -64,63 +65,25 @@ public class RumiJavaLogger {
 	 * @throws IOException
 	 */
 	public void hijack_std(SeverityLevel default_level) throws IOException{
+		//すでにハイジャック済みなら何もしない
+		if (hijack_std_enable) return;
+
+		//RumiJavaLoggerだけは直接読み書きできるようにする
 		stdout = System.out;
 		stderr = System.err;
 		hijack_std_enable = true;
 
-		//出力
-		PipedOutputStream out_pos = new PipedOutputStream();
-		PipedInputStream out_pis = new PipedInputStream(out_pos);
-		PrintStream out = new PrintStream(out_pos, true, "UTF-8");
-		System.setOut(out);
+		//標準出力をハイジャック
+		PrintStream stdout_hooked = new PrintStream(new LineOutputStream(line -> {
+			log_print(FacilityCode.User, default_level, line);
+		}), true, StandardCharsets.UTF_8);
+		System.setOut(stdout_hooked);
 
-		//エラー
-		PipedOutputStream err_pos = new PipedOutputStream();
-		PipedInputStream err_pis = new PipedInputStream(err_pos);
-		PrintStream err = new PrintStream(err_pos, true, "UTF-8");
-		System.setErr(err);
-
-		Thread out_watcher = new Thread(new Runnable() {
-			@Override
-			public void run() {
-				try {
-					BufferedReader br = new BufferedReader(new InputStreamReader(out_pis, StandardCharsets.UTF_8));
-					try {
-						String line;
-						while ((line = br.readLine()) != null) {
-							log_print(FacilityCode.User, default_level, line);
-						}
-					} finally {
-						br.close();
-					}
-				} catch (IOException ex) {
-					ex.printStackTrace();
-				}
-			}
-		});
-		out_watcher.setDaemon(true);
-		out_watcher.start();
-
-		Thread err_watcher = new Thread(new Runnable() {
-			@Override
-			public void run() {
-				try {
-					BufferedReader br = new BufferedReader(new InputStreamReader(err_pis, StandardCharsets.UTF_8));
-					try {
-						String line;
-						while ((line = br.readLine()) != null) {
-							log_print(FacilityCode.User, SeverityLevel.Error, line);
-						}
-					} finally {
-						br.close();
-					}
-				} catch (IOException ex) {
-					ex.printStackTrace();
-				}
-			}
-		});
-		err_watcher.setDaemon(true);
-		err_watcher.start();
+		//標準エラーをハイジャック
+		PrintStream stderr_hooked = new PrintStream(new LineOutputStream(line -> {
+			log_print(FacilityCode.User, SeverityLevel.Error, line);
+		}), true, StandardCharsets.UTF_8);
+		System.setErr(stderr_hooked);
 	}
 
 	/**
